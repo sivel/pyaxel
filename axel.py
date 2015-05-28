@@ -22,10 +22,18 @@ monkey.patch_all()
 import os
 import sys
 import glob
+import signal
 import timeit
 import argparse
 import requests
 import fileinput
+
+
+def catch_ctrl_c(signal, frame):
+    print
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, catch_ctrl_c)
 
 this = os.path.abspath(__file__)
 here = os.path.dirname(this)
