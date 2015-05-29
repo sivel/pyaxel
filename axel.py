@@ -14,6 +14,7 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+from __future__ import print_function
 
 from gevent import monkey
 from gevent.pool import Pool
@@ -31,175 +32,173 @@ import fileinput
 
 
 def catch_ctrl_c(signal, frame):
-    print
+    print()
     sys.exit(0)
 
-signal.signal(signal.SIGINT, catch_ctrl_c)
 
-this = os.path.abspath(__file__)
-here = os.path.dirname(this)
+class Axel(object):
+    def __init__(self):
+        signal.signal(signal.SIGINT, catch_ctrl_c)
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('url')
-    parser.add_argument('-c', '--count', type=int, default=8)
-    args = parser.parse_args()
-    return args
-args = parse_args()
+        self.this = os.path.abspath(__file__)
+        self.here = os.path.dirname(self.this)
 
-def get_file_info(args):
-    r = requests.head(args.url)
-    content_length = int(r.headers.get('Content-Length', 0))
-    chunk_size = content_length / args.count
-    chunks = []
-    for i in xrange(args.count):
-        if i == args.count - 1:
-            boundary = content_length
-        else:
-            boundary = ((i + 1) * chunk_size) - 1
-        chunks.append((i * chunk_size, boundary))
+        self.count = 8
+        self.url = None
 
-    filename = os.path.basename(args.url)
-    while os.path.isfile(filename):
-        prefix, ext = os.path.splitext(filename)
-        if ext[1:].isdigit():
-            newext = int(ext[1:]) + 1
-            filename = '%s.%s' % (prefix, newext)
-        else:
-            filename = '%s.0' % filename
+    def parse_args(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('url')
+        parser.add_argument('-c', '--count', type=int, default=self.count)
+        args = parser.parse_args()
 
-    return content_length, chunks, chunk_size, filename
-content_length, chunks, chunk_size, filename = get_file_info(args)
+        self.url = args.url
+        self.count = args.count
 
-def resume_check(args, filename, chunks, chunk_size):
-    globs = glob.glob(os.path.join(here, '%s.part*' % filename))
-    startcount = []
-    if len(globs) == args.count:
-        sizes = []
-        new_chunks = []
-        for i, f in enumerate(globs):
-            sizes.append(os.path.getsize(f))
-            if sizes[-1] == chunk_size:
-                new_chunks.append(None)
-                startcount.append(sizes[-1])
-            elif (sizes[-1] != chunks[i][1] and
-                    sizes[-1] < chunk_size):
-                new_chunks.append((
-                    chunks[i][0] + sizes[-1],
-                    ((i + 1) * chunk_size) - 1
-                ))
-                startcount.append(sizes[-1])
+        return args
+
+    def get_file_info(self):
+        r = requests.head(self.url)
+        self.content_length = int(r.headers.get('Content-Length', 0))
+        self.chunk_size = self.content_length / self.count
+        self.chunks = []
+        for i in xrange(self.count):
+            if i == self.count - 1:
+                boundary = self.content_length
             else:
-                print '%s < %s' % (sizes[-1], chunks[i][1] - chunks[i][0])
-                print ('partial files already exist, and do not match the '
-                       'size range')
-                print '    %s' % '\n    '.join(globs)
-                sys.exit(1)
+                boundary = ((i + 1) * self.chunk_size) - 1
+            self.chunks.append((i * self.chunk_size, boundary))
 
-        chunks[:] = new_chunks
-        print ('partial files already exist and match count (%s). There is '
-               'the posibility of creating a non working file. Please check '
-               'hashes after download completion\n' % args.count)
-    elif globs:
-        print ('partial files already exist, and do not match the count (%s) '
-               'specified:' % args.count)
-        print '    %s' % '\n    '.join(globs)
-        print '\nTry setting --count %s' % len(globs)
-        sys.exit(1)
-    return chunks, startcount
-chunks[:], startcount = resume_check(args, filename, chunks, chunk_size)
+        self.filename = os.path.basename(self.url)
+        while os.path.isfile(self.filename):
+            prefix, ext = os.path.splitext(self.filename)
+            if ext[1:].isdigit():
+                newext = int(ext[1:]) + 1
+                self.filename = '%s.%s' % (prefix, newext)
+            else:
+                self.filename = '%s.0' % self.filename
 
-def print_start(args, content_length, filename, startcount):
-    print 'Initializing download: %s' % args.url
-    print 'File size: %s bytes' % content_length
-    print 'Output file: %s' % filename
-    if startcount:
-        print 'Resuming download\n'
-    else:
-        print 'Starting download\n'
-print_start(args, content_length, filename, startcount)
+    def resume_check(self):
+        globs = glob.glob(os.path.join(self.here, '%s.part*' % self.filename))
+        self.startcount = []
+        if len(globs) == self.count:
+            sizes = []
+            new_chunks = []
+            for i, f in enumerate(globs):
+                sizes.append(os.path.getsize(f))
+                if sizes[-1] == self.chunk_size:
+                    new_chunks.append(None)
+                    self.startcount.append(sizes[-1])
+                elif (sizes[-1] != self.chunks[i][1] and
+                        sizes[-1] < self.chunk_size):
+                    new_chunks.append((
+                        self.chunks[i][0] + sizes[-1],
+                        ((i + 1) * self.chunk_size) - 1
+                    ))
+                    self.startcount.append(sizes[-1])
+                else:
+                    print('%s < %s' % (sizes[-1],
+                                       self.chunks[i][1] - self.chunks[i][0]))
+                    print('partial files already exist, and do not match the '
+                          'size range')
+                    print('    %s' % '\n    '.join(globs))
+                    sys.exit(1)
 
-def getter(filename, chunk, bytecount):
-    headers = {
-        'Range': 'bytes=%s-%s' % chunk
-    }
-    r = requests.get(args.url, headers=headers, stream=True)
-    with open(filename, 'a') as f:
-        for block in r.iter_content(4096):
-            if not block:
+            self.chunks[:] = new_chunks
+            print('partial files already exist and match count (%s). There '
+                  'is the posibility of creating a non working file. Please '
+                  'check hashes after download completion\n' % self.count)
+        elif globs:
+            print('partial files already exist, and do not match the count '
+                  '(%s) specified:' % self.count)
+            print('    %s' % '\n    '.join(globs))
+            print('\nTry setting --count %s' % len(globs))
+            sys.exit(1)
+
+    def print_start(self):
+        print('Initializing download: %s' % self.url)
+        print('File size: %s bytes' % self.content_length)
+        print('Output file: %s' % self.filename)
+        if self.startcount:
+            print('Resuming download\n')
+        else:
+            print('Starting download\n')
+
+    def getter(self, filename, chunk, bytecount):
+        headers = {
+            'Range': 'bytes=%s-%s' % chunk
+        }
+        r = requests.get(self.url, headers=headers, stream=True)
+        with open(filename, 'a') as f:
+            for block in r.iter_content(4096):
+                if not block:
+                    break
+                bytecount.append(len(block))
+                f.write(block)
+                f.flush()
+
+    def print_progress(self, pool, bytecount):
+        while 1:
+            time.sleep(0.1)
+
+            total = float(sum(bytecount))
+            if not total:
+                continue
+
+            if pool.free_count() == pool.size:
                 break
-            bytecount.append(len(block))
-            f.write(block)
-            f.flush()
 
-speed = 0
-def print_progress(args, pool, bytecount, start, content_length, startcount):
-    global speed
-    while 1:
-        time.sleep(0.1)
+            self.speed = total/(timeit.default_timer() - self.start)
+            remaining = self.content_length - total - sum(self.startcount)
+            percent = \
+                ((total + sum(self.startcount)) / self.content_length) * 100
+            sys.stdout.write('\r[%3.00f%%] %7.02f MB/s [%4.00fs] ' %
+                             (percent, self.speed/1024**2,
+                              remaining/self.speed))
+            sys.stdout.flush()
 
-        total = float(sum(bytecount))
-        if not total:
+    def fetch(self):
+        self.files = []
+        bytecount = []
+        self.start = timeit.default_timer()
+        p = Pool(size=self.count)
+
+        pp = Pool(size=1)
+        pp.spawn(self.print_progress, p, bytecount)
+
+        for i, chunk in enumerate(self.chunks):
+            self.files.append('%s.part%03d' % (self.filename, i))
+            if not chunk:
+                continue
+            p.spawn(self.getter, self.files[-1], chunk, bytecount)
+
+        p.join()
+
+        print()
+
+    def stitch(self):
+        with open(self.filename, 'w') as f:
+            for block in fileinput.input(self.files, bufsize=4096):
+                f.write(block)
+                f.flush()
+
+        for f in self.files:
             continue
+            os.unlink(f)
 
-        if pool.free_count() == pool.size:
-            break
-
-        speed = total/(timeit.default_timer() - start)
-        remaining = content_length - total - sum(startcount)
-        percent = ((total + sum(startcount)) / content_length) * 100
-        sys.stdout.write('\r[%3.00f%%] %7.02f MB/s [%4.00fs] ' %
-                         (percent, speed/1024**2, remaining/speed))
-        sys.stdout.flush()
+    def print_final(self):
+        print('\nDownloaded %.00f MB in %.00f seconds. (%.02f MB/s)' %
+              (self.content_length/1024**2,
+               timeit.default_timer() - self.start,
+               self.speed/1024**2))
 
 
-def fetch(args, chunks, filename, content_length, startcount):
-    files = []
-    bytecount = []
-    start = timeit.default_timer()
-    p = Pool(size=args.count)
-
-    pp = Pool(size=1)
-    pp.spawn(print_progress, args, p, bytecount, start, content_length, startcount)
-
-    for i, chunk in enumerate(chunks):
-        files.append('%s.part%03d' % (filename, i))
-        if not chunk:
-            continue
-        p.spawn(getter, files[-1], chunk, bytecount)
-
-    p.join()
-
-#    while p.free_count() != p.size:
-#        p.join(timeout=0.1)
-#        total = float(sum(bytecount))
-#        if not total:
-#            continue
-#        speed = total/(timeit.default_timer() - start)
-#        remaining = content_length - total - sum(startcount)
-#        percent = ((total + sum(startcount)) / content_length) * 100
-#        sys.stdout.write('\r[%3.00f%%] %7.02f MB/s [%4.00fs] ' % (percent,
-#                                                                  speed/1024**2,
-#                                                                  remaining/speed))
-#        sys.stdout.flush()
-
-    print
-    return files, start
-files, start = fetch(args, chunks, filename, content_length, startcount)
-
-def stitch(filename, files):
-    with open(filename, 'w') as f:
-        for block in fileinput.input(files, bufsize=4096):
-            f.write(block)
-            f.flush()
-
-    for f in files:
-        continue
-        os.unlink(f)
-stitch(filename, files)
-
-def print_final(content_length, start, speed):
-    print ('\nDownloaded %.00f MB in %.00f seconds. (%.02f MB/s)' %
-           (content_length/1024**2, timeit.default_timer() - start,
-            speed/1024**2))
-print_final(content_length, start, speed)
+if __name__ == '__main__':
+    axel = Axel()
+    axel.parse_args()
+    axel.get_file_info()
+    axel.resume_check()
+    axel.print_start()
+    axel.fetch()
+    axel.stitch()
+    axel.print_final()
