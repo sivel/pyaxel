@@ -183,7 +183,6 @@ class Axel(object):
                 f.flush()
 
         for f in self.files:
-            continue
             os.unlink(f)
 
     def print_final(self):
