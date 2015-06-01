@@ -31,7 +31,7 @@ import requests
 import fileinput
 
 
-def catch_ctrl_c(signal, frame):
+def catch_ctrl_c(signum, frame):
     print()
     sys.exit(0)
 
@@ -45,6 +45,16 @@ class Axel(object):
 
         self.count = 8
         self.url = None
+        self.speed = 0
+        self.total_time = 0
+
+        self.content_length = 0
+        self.start = 0
+        self.startcount = []
+        self.filename = None
+        self.chunk_size = 0
+        self.chunks = []
+        self.files = []
 
     def parse_args(self):
         parser = argparse.ArgumentParser()
@@ -61,7 +71,6 @@ class Axel(object):
         r = requests.head(self.url)
         self.content_length = int(r.headers.get('Content-Length', 0))
         self.chunk_size = self.content_length / self.count
-        self.chunks = []
         for i in xrange(self.count):
             if i == self.count - 1:
                 boundary = self.content_length
@@ -80,7 +89,6 @@ class Axel(object):
 
     def resume_check(self):
         globs = glob.glob(os.path.join(self.here, '%s.part*' % self.filename))
-        self.startcount = []
         if len(globs) == self.count:
             sizes = []
             new_chunks = []
@@ -158,7 +166,6 @@ class Axel(object):
             sys.stdout.flush()
 
     def fetch(self):
-        self.files = []
         bytecount = []
         self.start = timeit.default_timer()
         p = Pool(size=self.count)
@@ -174,6 +181,8 @@ class Axel(object):
 
         p.join()
 
+        self.total_time = timeit.default_timer() - self.start
+
         print()
 
     def stitch(self):
@@ -188,7 +197,7 @@ class Axel(object):
     def print_final(self):
         print('\nDownloaded %.00f MB in %.00f seconds. (%.02f MB/s)' %
               (self.content_length/1024**2,
-               timeit.default_timer() - self.start,
+               self.total_time,
                self.speed/1024**2))
 
 
