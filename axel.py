@@ -40,9 +40,6 @@ class Axel(object):
     def __init__(self):
         signal.signal(signal.SIGINT, catch_ctrl_c)
 
-        self.this = os.path.abspath(__file__)
-        self.here = os.path.dirname(self.this)
-
         self.count = 8
         self.url = None
         self.speed = 0
@@ -88,7 +85,7 @@ class Axel(object):
                 self.filename = '%s.0' % self.filename
 
     def resume_check(self):
-        globs = glob.glob(os.path.join(self.here, '%s.part*' % self.filename))
+        globs = glob.glob('%s.part*' % self.filename)
         if len(globs) == self.count:
             sizes = []
             new_chunks = []
